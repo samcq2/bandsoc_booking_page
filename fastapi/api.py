@@ -145,5 +145,21 @@ def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depe
     userid = res[0]
 
     redis_client.set(access_token, userid,
-                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
+                    ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
+    return {"access_token": access_token, "user_id": userid}
+
+@app.post("/create_account")
+def create_account(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depends(get_db_connection)):
+    cur = conn.cursor()
+    
+    name = credentials.username
+    hashed_password = credentials.password.encode()
+    
+    cur.execute(f"insert into users values ({name}, {hashed_password}, 0 , 'regular' ")
+    cur.execute("SELECT user_id FROM users where name = %s", [name])
+    res = cur.fetchone()
+    userid = res[0]
+    
+    redis_client.set(access_token, userid,
+                    ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     return {"access_token": access_token, "user_id": userid}
