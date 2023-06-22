@@ -163,3 +163,23 @@ def create_account(credentials: HTTPBasicCredentials = Depends(login_security), 
     redis_client.set(access_token, userid,
                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     return {"access_token": access_token, "user_id": userid}
+
+@app.post("/logout")
+def logout(Authorization: str = Header(None)):
+    if not Authorization:
+        raise HTTPException(
+            status_code=400, detail="Authorization header missing")
+
+    bearer, token = Authorization.split(" ")
+    if bearer != "Bearer":
+        raise HTTPException(
+            status_code=400, detail="Authorization header invalid")
+
+    # instead of trying to decode, we will just check if the token is in the logged in users cache
+    # payload = jwt_lib.decode(token, "secret", algorithms=["HS256"])
+    if redis_client.exists(token):
+        # Remove the token from Redis
+        redis_client.delete(token)
+        return {"message": "Successfully logged out"}
+    else:
+        raise HTTPException(status_code=400, detail="Token not found")
