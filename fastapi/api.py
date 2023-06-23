@@ -126,14 +126,33 @@ def create_access_token(data: dict, secret: str, algorithm: str = 'HS256', expir
 
 # API ENDPOINTS
 
-@app.post("/get_user_credits")
+@app.get("/get_current_week")
+def get_current_week(user_id: int = Depends(get_current_user),conn=Depends(get_db_connection)):
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT * FROM slot_to_time")
+        return cur.fetchone()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+@app.get("/get_user_credits")
 def get_user_credits(user_id: int = Depends(get_current_user), conn=Depends(get_db_connection)):
     cur = conn.cursor()
-    cur.execute("SELECT credits from users WHERE user_id = %s", [user_id])
-    user_credits = cur.fetchone()
-    return user_credits
+    try:
+        cur.execute("SELECT credits from users WHERE user_id = %s", [user_id])
+        user_credits = cur.fetchone()
+        return user_credits
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        cur.close()
+        return None
 
-@app.post("/login")
+@app.get("/login")
 def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depends(get_db_connection)):
     name = credentials.username
     password = credentials.password
@@ -170,7 +189,7 @@ def create_account(credentials: HTTPBasicCredentials = Depends(login_security), 
                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     return {"access_token": access_token, "user_id": user_id}
 
-@app.post("/logout")
+@app.get("/logout")
 def logout(Authorization: str = Header(None)):
     if not Authorization:
         raise HTTPException(
