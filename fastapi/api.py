@@ -13,7 +13,7 @@ from fastapi import FastAPI, APIRouter, Query, HTTPException, status, Depends, H
 from fastapi.security import HTTPBasic, HTTPBasicCredentials, OAuth2PasswordBearer
 from fastapi.exceptions import RequestValidationError
 # from pydantic import BaseModel
-import psycopg2
+from psycopg2 import sql
 from psycopg2 import extras
 from fastapi.middleware.cors import CORSMiddleware
 import bcrypt
@@ -145,24 +145,27 @@ def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depe
     user_id = res[0]
 
     redis_client.set(access_token, user_id,
-                    ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
+                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     return {"access_token": access_token, "user_id": user_id}
+
 
 @app.post("/create_account")
 def create_account(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depends(get_db_connection)):
     cur = conn.cursor()
-    
+
     name = credentials.username
     hashed_password = credentials.password.encode()
-    
-    cur.execute(f"insert into users values ({name}, {hashed_password}, 0 , 'regular' ")
+
+    cur.execute(
+        f"insert into users values ({name}, {hashed_password}, 0 , 'regular' ")
     cur.execute("SELECT user_id FROM users where name = %s", [name])
     res = cur.fetchone()
     user_id = res[0]
-    
+
     redis_client.set(access_token, user_id,
-                    ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
+                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     return {"access_token": access_token, "user_id": user_id}
+
 
 @app.post("/logout")
 def logout(Authorization: str = Header(None)):
@@ -186,30 +189,44 @@ def logout(Authorization: str = Header(None)):
 
 # Book
 
+
 @app.post("/book/{user_id}/{date}/{slot}")
-def book(user_id: int, date: str, slot: int,Authorization: str = Header(None), conn=Depends(get_db_connection)):
-    # Error checking
+def book(user_id: int, date: str, slot: int, Authorization: str = Header(None), conn=Depends(get_db_connection)):
     if not Authorization:
-        raise HTTPException(status_code=400, detail="Authorization header missing")
+        raise HTTPException(
+            status_code=400, detail="Authorization header missing")
     bearer, token = Authorization.split(" ")
     if bearer != "Bearer":
-        raise HTTPException(status_code=400, detail="Authorization header is invalid")
-    
+        raise HTTPException(
+            status_code=400, detail="Authorization header is invalid")
+
     user_id = redis_client.get(token)
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid Token")
-    
-    
-    # get rds connection 
+
+    # get rds connection
     cur = conn.cursor()
-    
-    cur.execute("SELECT credits,name FROM users where user_id = '{user_id}'")
-    
-    user_credits, username = cur.fetchone()
-    
-    if user_credits <= 0:
-        return #throw exception later
-    
-    cur.execute(f"UPDATE users SET credits = credits - 1 WHERE user_id = '{user_id}'")
-    cur.execute(f"INSERT into booking_history (date_of_booking, slot_booked, user_id) values ('{date}', '{slot}','{user_id}')")
-    cur.execute(f"UPDATE current_week SET {slot} = '{username}' WHERE current_day = '{date}'")
+
+    try:
+        cur.execute(
+            sql.SQL("SELECT credits,name FROM users WHERE user_id = %s"), (user_id,))
+        user_credits, username = cur.fetchone()
+
+        if user_credits <= 0:
+            raise HTTPException(status_code=400, detail="Insufficient credits")
+
+        cur.execute(sql.SQL("BEGIN"))
+        cur.execute(sql.SQL(
+            "UPDATE users SET credits = credits - 1 WHERE user_id = %s"), (user_id,))
+        cur.execute(sql.SQL(
+            "INSERT into booking_history (date_of_booking, slot_booked, user_id) VALUES (%s, %s, %s)"), (date, slot, user_id))
+        cur.execute(sql.SQL("UPDATE current_week SET {} = %s WHERE current_day = %s").format(
+            sql.Identifier(slot)), (username, date))
+        cur.execute(sql.SQL("COMMIT"))
+
+    except Exception as e:
+        cur.execute(sql.SQL("ROLLBACK"))
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        cur.close()
