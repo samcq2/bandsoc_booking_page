@@ -126,6 +126,12 @@ def create_access_token(data: dict, secret: str, algorithm: str = 'HS256', expir
 
 # API ENDPOINTS
 
+@app.post("/get_user_credits")
+def get_user_credits(user_id: int = Depends(get_current_user), conn=Depends(get_db_connection)):
+    cur = conn.cursor()
+    cur.execute("SELECT credits from users WHERE user_id = %s", [user_id])
+    user_credits = cur.fetchone()
+    return user_credits
 
 @app.post("/login")
 def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depends(get_db_connection)):
@@ -145,9 +151,8 @@ def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depe
     user_id = res[0]
 
     redis_client.set(access_token, user_id,
-                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
+                    ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     return {"access_token": access_token, "user_id": user_id}
-
 
 @app.post("/create_account")
 def create_account(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depends(get_db_connection)):
@@ -156,16 +161,14 @@ def create_account(credentials: HTTPBasicCredentials = Depends(login_security), 
     name = credentials.username
     hashed_password = credentials.password.encode()
 
-    cur.execute(
-        f"insert into users values ({name}, {hashed_password}, 0 , 'regular' ")
+    cur.execute("INSERT INTO users (name, hashed_password, credits, user_type) VALUES (%s, %s, %s, %s)",(name, hashed_password, 0, 'regular'))
     cur.execute("SELECT user_id FROM users where name = %s", [name])
     res = cur.fetchone()
     user_id = res[0]
 
     redis_client.set(access_token, user_id,
-                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
+                    ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     return {"access_token": access_token, "user_id": user_id}
-
 
 @app.post("/logout")
 def logout(Authorization: str = Header(None)):
@@ -187,30 +190,15 @@ def logout(Authorization: str = Header(None)):
     else:
         raise HTTPException(status_code=400, detail="Token not found")
 
-# Book
-
-
-@app.post("/book/{user_id}/{date}/{slot}")
-def book(user_id: int, date: str, slot: int, Authorization: str = Header(None), conn=Depends(get_db_connection)):
-    if not Authorization:
-        raise HTTPException(
-            status_code=400, detail="Authorization header missing")
-    bearer, token = Authorization.split(" ")
-    if bearer != "Bearer":
-        raise HTTPException(
-            status_code=400, detail="Authorization header is invalid")
-
-    user_id = redis_client.get(token)
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid Token")
-
-    # get rds connection
+@app.post("/book/{date}/{slot}")
+def book(date: str, slot: int, Authorization: str = Header(None), conn=Depends(get_db_connection), user_id: int =Depends(get_current_user)):
     cur = conn.cursor()
 
     try:
         cur.execute(
             sql.SQL("SELECT credits,name FROM users WHERE user_id = %s"), (user_id,))
         user_credits, username = cur.fetchone()
+        
 
         if user_credits <= 0:
             raise HTTPException(status_code=400, detail="Insufficient credits")
@@ -230,3 +218,4 @@ def book(user_id: int, date: str, slot: int, Authorization: str = Header(None), 
 
     finally:
         cur.close()
+
