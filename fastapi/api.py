@@ -28,9 +28,9 @@ class User(BaseModel):
     permissions: str
 
 
-class Slots(BaseModel):
+class Slot(BaseModel):
     slotNumber: int
-    day: str
+    date: str
 
 
 def get_db_connection():
@@ -142,11 +142,11 @@ def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depe
 
     cur.execute("SELECT user_id FROM users where name = %s", [name])
     res = cur.fetchone()
-    userid = res[0]
+    user_id = res[0]
 
-    redis_client.set(access_token, userid,
+    redis_client.set(access_token, user_id,
                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
-    return {"access_token": access_token, "user_id": userid}
+    return {"access_token": access_token, "user_id": user_id}
 
 @app.post("/create_account")
 def create_account(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depends(get_db_connection)):
@@ -158,11 +158,11 @@ def create_account(credentials: HTTPBasicCredentials = Depends(login_security), 
     cur.execute(f"insert into users values ({name}, {hashed_password}, 0 , 'regular' ")
     cur.execute("SELECT user_id FROM users where name = %s", [name])
     res = cur.fetchone()
-    userid = res[0]
+    user_id = res[0]
     
-    redis_client.set(access_token, userid,
+    redis_client.set(access_token, user_id,
                     ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
-    return {"access_token": access_token, "user_id": userid}
+    return {"access_token": access_token, "user_id": user_id}
 
 @app.post("/logout")
 def logout(Authorization: str = Header(None)):
@@ -183,3 +183,33 @@ def logout(Authorization: str = Header(None)):
         return {"message": "Successfully logged out"}
     else:
         raise HTTPException(status_code=400, detail="Token not found")
+
+# Book
+
+@app.post("/book/{user_id}/{date}/{slot}")
+def book(user_id: int, date: str, slot: int,Authorization: str = Header(None), conn=Depends(get_db_connection)):
+    # Error checking
+    if not Authorization:
+        raise HTTPException(status_code=400, detail="Authorization header missing")
+    bearer, token = Authorization.split(" ")
+    if bearer != "Bearer":
+        raise HTTPException(status_code=400, detail="Authorization header is invalid")
+    
+    user_id = redis_client.get(token)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid Token")
+    
+    
+    # get rds connection 
+    cur = conn.cursor()
+    
+    cur.execute("SELECT credits,name FROM users where user_id = '{user_id}'")
+    
+    user_credits, username = cur.fetchone()
+    
+    if user_credits <= 0:
+        return #throw exception later
+    
+    cur.execute(f"UPDATE users SET credits = credits - 1 WHERE user_id = '{user_id}'")
+    cur.execute(f"INSERT into booking_history (date_of_booking, slot_booked, user_id) values ('{date}', '{slot}','{user_id}')")
+    cur.execute(f"UPDATE current_week SET {slot} = '{username}' WHERE current_day = '{date}'")
