@@ -31,27 +31,6 @@ class Slot(BaseModel):
     date: str
 
 
-#    --host=bandsoc-db.cfflfq6deazw.eu-west-2.rds.amazonaws.com \
-#    --port=5432 \
-#    --username=postgres \
-#    --password \
-#    --dbname=bandsoc_db
-
-
-
-def get_db_connection():
-    conn = psycopg2.connect(
-        database='bandsoc_db',
-        user='postgres',
-        password='68&kh50C5W31',
-        host='bandsoc-db.cfflfq6deazw.eu-west-2.rds.amazonaws.com',
-        port='5432',
-    )
-    try:
-        yield conn
-    finally:
-        conn.close()
-
 
 app = FastAPI()
 
@@ -94,8 +73,7 @@ def get_current_user(Authorization: str = Header(None)):
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
 
-        redis_client.expire(token, TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
-
+        # redis_client.expire(token, TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
         return int(user_id)
     except KeyError as e:
         raise HTTPException(status_code=400, detail="Token is invalid")
@@ -238,6 +216,14 @@ def create_account(credentials: HTTPBasicCredentials = Depends(login_security), 
                     # ex=TOKEN_EXPIRATION_SECONDS_REMEMBER_ME)
     # return {"access_token": access_token, "user_id": user_id}
     return {'message':'success', 'user_id':user_id, 'user':res}
+
+
+
+@app.post("/book/{date}/{slot}")
+def book(date: str, slot: int, Authorization: str = Header(None), conn=Depends(get_db_connection), user_id: int =Depends(get_current_user)):
+    cur = conn.cursor()
+    
+    redis_client
 
 # @app.post("/book/{date}/{slot}")
 # def book(date: str, slot: int, Authorization: str = Header(None), conn=Depends(get_db_connection), user_id: int =Depends(get_current_user)):
