@@ -31,6 +31,18 @@ class Slot(BaseModel):
     date: str
 
 
+def get_db_connection():
+    conn = psycopg2.connect(
+        database='bandsoc_db',
+        user='postgres',
+        password='68&kh50C5W31',
+        host='bandsoc-db.cfflfq6deazw.eu-west-2.rds.amazonaws.com',
+        port='5432',
+    )
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 app = FastAPI()
 
@@ -126,22 +138,32 @@ def get_current_week(conn=Depends(get_db_connection)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/get_time_to_slot")
+def get_time_to_slot(conn=Depends(get_db_connection)):
+    cur = conn.cursor()
+    try:
+        cur.execute("select * from slot_to_time")
+        
+        return cur.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))  
+
 @app.get("/get_user_credits")
 def get_user_credits(user_id: int = Depends(get_current_user), conn=Depends(get_db_connection)):
     cur = conn.cursor()
     try:
         cur.execute("SELECT credits from users WHERE user_id = %s", [user_id])
         user_credits = cur.fetchone()
-        return user_credits
+        print(user_credits[0])
+        return user_credits[0]
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
     finally:
         cur.close()
-        return None
 
-@app.get("/login")
+@app.post("/login")
 def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depends(get_db_connection)):
     email = credentials.username
     password = credentials.password
@@ -162,7 +184,7 @@ def login(credentials: HTTPBasicCredentials = Depends(login_security), conn=Depe
     redis_client[access_token] = user_id
     return {"access_token": access_token, "user_id": user_id}
 
-@app.get("/logout")
+@app.post("/logout")
 def logout(Authorization: str = Header(None)):
     if not Authorization:
         raise HTTPException(
@@ -205,7 +227,7 @@ def create_account(credentials: HTTPBasicCredentials = Depends(login_security), 
 
     # Hashing the password, saving this to db
     hashed_password = bcrypt.hashpw(byte_password, bcrypt.gensalt())
-    # hashed_password = '$2b$12$LJIJsFL7tdQ145T5nbDMZuzR58/yxRb2uSySmoyOzFU/rG4O8kR5W'
+
     cur.execute("INSERT INTO users (email, full_name, password, credits, type) VALUES (%s, %s, %s, %s, %s)",(email,'need to add name later', hashed_password, 0, 'regular'))
     conn.commit()
     cur.execute("SELECT * FROM users where email = %s", [email])
@@ -219,38 +241,33 @@ def create_account(credentials: HTTPBasicCredentials = Depends(login_security), 
 
 
 
+
 @app.post("/book/{date}/{slot}")
 def book(date: str, slot: int, Authorization: str = Header(None), conn=Depends(get_db_connection), user_id: int =Depends(get_current_user)):
     cur = conn.cursor()
-    
-    redis_client
 
-# @app.post("/book/{date}/{slot}")
-# def book(date: str, slot: int, Authorization: str = Header(None), conn=Depends(get_db_connection), user_id: int =Depends(get_current_user)):
-#     cur = conn.cursor()
-
-#     try:
-#         cur.execute(
-#             sql.SQL("SELECT credits,name FROM users WHERE user_id = %s"), (user_id,))
-#         user_credits, username = cur.fetchone()
+    try:
+        cur.execute(
+            sql.SQL("SELECT credits,name FROM users WHERE user_id = %s"), (user_id,))
+        user_credits, username = cur.fetchone()
         
 
-#         if user_credits <= 0:
-#             raise HTTPException(status_code=400, detail="Insufficient credits")
+        if user_credits <= 0:
+            raise HTTPException(status_code=400, detail="Insufficient credits")
 
-#         cur.execute(sql.SQL("BEGIN"))
-#         cur.execute(sql.SQL(
-#             "UPDATE users SET credits = credits - 1 WHERE user_id = %s"), (user_id,))
-#         cur.execute(sql.SQL(
-#             "INSERT into booking_history (date_of_booking, slot_booked, user_id) VALUES (%s, %s, %s)"), (date, slot, user_id))
-#         cur.execute(sql.SQL("UPDATE current_week SET {} = %s WHERE current_day = %s").format(
-#             sql.Identifier(slot)), (username, date))
-#         cur.execute(sql.SQL("COMMIT"))
+        cur.execute(sql.SQL("BEGIN"))
+        cur.execute(sql.SQL(
+            "UPDATE users SET credits = credits - 1 WHERE user_id = %s"), (user_id,))
+        cur.execute(sql.SQL(
+            "INSERT into booking_history (date_of_booking, slot_booked, user_id) VALUES (%s, %s, %s)"), (date, slot, user_id))
+        cur.execute(sql.SQL("UPDATE current_week SET {} = %s WHERE current_day = %s").format(
+            sql.Identifier(slot)), (username, date))
+        cur.execute(sql.SQL("COMMIT"))
 
-#     except Exception as e:
-#         cur.execute(sql.SQL("ROLLBACK"))
-#         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        cur.execute(sql.SQL("ROLLBACK"))
+        raise HTTPException(status_code=500, detail=str(e))
 
-#     finally:
-#         cur.close()
+    finally:
+        cur.close()
 
